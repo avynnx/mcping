@@ -1,0 +1,25 @@
+[package]
+name = "mcping"
+version = "0.1.0"
+edition = "2024"
+description = "Ping Minecraft Java servers from your terminal"
+license = "MIT"
+repository = "https://github.com/avynnx/mcping"
+homepage = "https://avynnx.dev/mcping"
+keywords = ["minecraft", "ping", "cli", "network"]
+categories = ["command-line-utilities", "network-programming"]
+
+[profile.release]
+lto = true
+strip = true
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.23.1"
+clap = { version = "4.6.7", features = ["derive"] }
+hickory-resolver = "0.26.3"
+owo-colors = "4.4.0"
+png = "0.18.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
