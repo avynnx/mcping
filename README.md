@@ -2,18 +2,7 @@
 
 Ping Minecraft Java servers from your terminal.
 
-```
-$ mcping mc.hypixel.net donutsmp.net
-● mc.hypixel.net  32 ms
-  Hypixel Network [1.8/26.3]
-  SKYBLOCK GHOST VISITORS
-  25,396/200,000 players · Requires MC 1.8 / 1.21 (protocol 47)
-
-● donutsmp.net → java.donutsmp.net:25565  41 ms
-  DonutSMP.net
-  ѕᴜʀᴠɪᴠᴀʟ
-  18,670/50,000 players · Velocity 1.7.2-26.3 (protocol 777)
-```
+![mcping pinging Hypixel and DonutSMP](assets/demo.svg)
 
 - The server icon drawn next to the output with truecolor half blocks
 - MOTDs in their real colors (legacy `§` codes, chat components and hex colors)
@@ -63,7 +52,7 @@ mcping <SERVER>...
       --icon-size <PX>   icon size in pixels, 2-64 [default: 16]
 ```
 
-Servers can be `host`, `host:port`, an IP or `[ipv6]:port`. Colors and icons turn off when output isn't a terminal or `NO_COLOR` is set.
+Servers can be `host`, `host:port`, an IP or `[ipv6]:port`. Colors and icons turn off when output isn't a terminal or `NO_COLOR` is set, and `CLICOLOR_FORCE=1` keeps them on.
 
 ```
 mcping play.example.net 10.0.0.5:25570 --json | jq '.[] | {server, latency_ms}'

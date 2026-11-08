@@ -64,7 +64,9 @@ struct Reply {
 async fn main() -> ExitCode {
     let args = Args::parse();
     let timeout = Duration::from_secs(args.timeout);
-    let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    let forced = std::env::var_os("CLICOLOR_FORCE").is_some_and(|v| v != "0");
+    let color =
+        (forced || std::io::stdout().is_terminal()) && std::env::var_os("NO_COLOR").is_none();
     let icon_size = (color && !args.no_icon).then_some(usize::from(args.icon_size));
 
     let tasks: Vec<_> = args
