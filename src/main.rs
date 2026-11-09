@@ -1,6 +1,7 @@
 mod icon;
 mod protocol;
 mod status;
+mod uninstall;
 
 use std::io::IsTerminal;
 use std::net::IpAddr;
@@ -22,7 +23,7 @@ const DEFAULT_PORT: u16 = 25565;
 #[command(version, about = "Ping Minecraft Java servers from your terminal")]
 struct Args {
     #[arg(
-        required = true,
+        required_unless_present = "uninstall",
         value_name = "SERVER",
         help = "host, host:port, IP or [ipv6]:port"
     )]
@@ -51,6 +52,9 @@ struct Args {
         help = "Icon size in pixels"
     )]
     icon_size: u16,
+
+    #[arg(short, long, help = "Uninstall mcping")]
+    uninstall: bool,
 }
 
 struct Reply {
@@ -63,6 +67,16 @@ struct Reply {
 #[tokio::main]
 async fn main() -> ExitCode {
     let args = Args::parse();
+    if args.uninstall {
+        return match uninstall::run() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
     let timeout = Duration::from_secs(args.timeout);
     let forced = std::env::var_os("CLICOLOR_FORCE").is_some_and(|v| v != "0");
     let color =

@@ -50,6 +50,7 @@ mcping <SERVER>...
       --json             print JSON instead
       --no-icon          don't draw the server icon
       --icon-size <PX>   icon size in pixels, 2-64 [default: 16]
+  -u, --uninstall        uninstall mcping
 ```
 
 Servers can be `host`, `host:port`, an IP or `[ipv6]:port`. Colors and icons turn off when output isn't a terminal or `NO_COLOR` is set, and `CLICOLOR_FORCE=1` keeps them on.
@@ -57,6 +58,21 @@ Servers can be `host`, `host:port`, an IP or `[ipv6]:port`. Colors and icons tur
 ```
 mcping play.example.net 10.0.0.5:25570 --json | jq '.[] | {server, latency_ms}'
 ```
+
+## Uninstall
+
+```
+mcping -u
+```
+
+If you used the install script, this removes mcping. If you installed it with winget, Cargo or Nix, it tells you the command to run instead:
+
+| Installed with | Uninstall with |
+|---|---|
+| install script | `mcping -u` or `rm ~/.local/bin/mcping` |
+| winget | `winget uninstall avynnx.mcping` |
+| Cargo | `cargo uninstall mcping` |
+| Nix | `nix profile remove mcping` |
 
 ## License
 
