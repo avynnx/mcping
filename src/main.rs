@@ -4,9 +4,9 @@ mod status;
 mod uninstall;
 
 use std::io::IsTerminal;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
@@ -38,13 +38,14 @@ struct Args {
     )]
     timeout: u64,
 
-    #[arg(long, help = "Print JSON instead")]
+    #[arg(short, long, help = "Print JSON instead")]
     json: bool,
 
-    #[arg(long, help = "Don't draw the server icon")]
+    #[arg(short, long, help = "Don't draw the server icon")]
     no_icon: bool,
 
     #[arg(
+        short = 's',
         long,
         default_value_t = 16,
         value_name = "PX",
@@ -52,6 +53,9 @@ struct Args {
         help = "Icon size in pixels"
     )]
     icon_size: u16,
+
+    #[arg(short, long, help = "Show each step of the ping")]
+    verbose: bool,
 
     #[arg(short, long, help = "Uninstall mcping")]
     uninstall: bool,
@@ -88,10 +92,11 @@ async fn main() -> ExitCode {
         .into_iter()
         .map(|server| {
             tokio::spawn(async move {
-                let result = tokio::time::timeout(timeout, query(&server))
+                let mut log = Vec::new();
+                let result = tokio::time::timeout(timeout, query(&server, &mut log))
                     .await
                     .unwrap_or_else(|_| Err(anyhow!("timed out")));
-                (server, result)
+                (server, log, result)
             })
         })
         .collect();
@@ -104,11 +109,21 @@ async fn main() -> ExitCode {
         }
     }
 
-    let failed = results.iter().any(|(_, result)| result.is_err());
+    let failed = results.iter().any(|(_, _, result)| result.is_err());
     if args.json {
+        if args.verbose {
+            for (server, log, _) in &results {
+                for step in log {
+                    eprintln!("{server}: {step}");
+                }
+            }
+        }
         print_json(&results);
     } else {
-        for (server, result) in &results {
+        for (server, log, result) in &results {
+            if args.verbose {
+                print_log(log, color);
+            }
             match result {
                 Ok(reply) => print_reply(server, reply, color, icon_size),
                 Err(e) => print_error(server, e, color),
@@ -123,16 +138,48 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn query(server: &str) -> Result<Reply> {
+async fn query(server: &str, log: &mut Vec<String>) -> Result<Reply> {
     let (host, port) = split_address(server)?;
     let (target, target_port) = match port {
         Some(port) => (host.to_string(), port),
-        None => resolve_srv(host)
-            .await
-            .unwrap_or_else(|| (host.to_string(), DEFAULT_PORT)),
+        None if host.parse::<IpAddr>().is_ok() || host == "localhost" => {
+            (host.to_string(), DEFAULT_PORT)
+        }
+        None => {
+            let started = Instant::now();
+            match resolve_srv(host).await {
+                Some((target, port)) => {
+                    log.push(format!(
+                        "SRV _minecraft._tcp.{host} -> {target}:{port} ({} ms)",
+                        started.elapsed().as_millis()
+                    ));
+                    (target, port)
+                }
+                None => {
+                    log.push(format!(
+                        "no SRV record for {host}, using port {DEFAULT_PORT}"
+                    ));
+                    (host.to_string(), DEFAULT_PORT)
+                }
+            }
+        }
     };
 
-    let pong = protocol::ping((&target, target_port), host, target_port).await?;
+    let started = Instant::now();
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((target.as_str(), target_port))
+        .await
+        .with_context(|| format!("couldn't resolve {target}"))?
+        .collect();
+    if target.parse::<IpAddr>().is_err() {
+        let ips: Vec<String> = addrs.iter().map(|addr| addr.ip().to_string()).collect();
+        log.push(format!(
+            "resolved {target} -> {} ({} ms)",
+            ips.join(", "),
+            started.elapsed().as_millis()
+        ));
+    }
+
+    let pong = protocol::ping(&addrs, host, target_port, log).await?;
     let mut raw: Value = serde_json::from_str(&pong.json).context("server sent invalid JSON")?;
     if let Some(players) = raw.get_mut("players").and_then(Value::as_object_mut) {
         players.remove("sample");
@@ -165,9 +212,6 @@ fn split_address(server: &str) -> Result<(&str, Option<u16>)> {
 }
 
 async fn resolve_srv(host: &str) -> Option<(String, u16)> {
-    if host.parse::<IpAddr>().is_ok() || host == "localhost" {
-        return None;
-    }
     let resolver = TokioResolver::builder_tokio().ok()?.build().ok()?;
     let lookup = resolver
         .srv_lookup(format!("_minecraft._tcp.{host}."))
@@ -325,6 +369,16 @@ fn print_reply(server: &str, reply: &Reply, color: bool, icon_size: Option<usize
     println!();
 }
 
+fn print_log(log: &[String], color: bool) {
+    for step in log {
+        if color {
+            println!("{}", format!("→ {step}").dimmed());
+        } else {
+            println!("→ {step}");
+        }
+    }
+}
+
 fn print_error(server: &str, error: &anyhow::Error, color: bool) {
     let message = format!("{error:#}");
     if color {
@@ -334,10 +388,10 @@ fn print_error(server: &str, error: &anyhow::Error, color: bool) {
     }
 }
 
-fn print_json(results: &[(String, Result<Reply>)]) {
+fn print_json(results: &[(String, Vec<String>, Result<Reply>)]) {
     let out: Vec<Value> = results
         .iter()
-        .map(|(server, result)| match result {
+        .map(|(server, _, result)| match result {
             Ok(reply) => json!({
                 "server": server,
                 "online": true,

@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
@@ -69,14 +70,31 @@ async fn expect_packet(stream: &mut TcpStream, id: i32) -> Result<()> {
     Ok(())
 }
 
-pub async fn ping(addr: (&str, u16), host: &str, port: u16) -> Result<Pong> {
-    let mut stream = TcpStream::connect(addr).await?;
+pub async fn ping(
+    addrs: &[SocketAddr],
+    host: &str,
+    port: u16,
+    log: &mut Vec<String>,
+) -> Result<Pong> {
+    let list: Vec<String> = addrs.iter().map(SocketAddr::to_string).collect();
+    log.push(format!("connecting to {}", list.join(", ")));
+    let started = Instant::now();
+    let mut stream = TcpStream::connect(addrs).await?;
     stream.set_nodelay(true)?;
+    log.push(format!(
+        "connected to {} ({} ms)",
+        stream.peer_addr()?,
+        started.elapsed().as_millis()
+    ));
 
     let started = Instant::now();
     let mut out = handshake(host, port);
     out.extend(packet(0x00, &[]));
     stream.write_all(&out).await?;
+    log.push(format!(
+        "sent handshake and status request ({} bytes)",
+        out.len()
+    ));
 
     expect_packet(&mut stream, 0x00).await?;
     let len = read_varint(&mut stream).await?;
@@ -86,15 +104,25 @@ pub async fn ping(addr: (&str, u16), host: &str, port: u16) -> Result<Pong> {
     let mut json = vec![0; len as usize];
     stream.read_exact(&mut json).await?;
     let status_rtt = started.elapsed();
+    log.push(format!(
+        "got status response ({len} bytes, {} ms)",
+        status_rtt.as_millis()
+    ));
 
     let payload = started.elapsed().as_nanos() as i64;
+    let ping = packet(0x01, &payload.to_be_bytes());
     let sent = Instant::now();
-    stream
-        .write_all(&packet(0x01, &payload.to_be_bytes()))
-        .await?;
+    stream.write_all(&ping).await?;
+    log.push(format!("sent ping ({} bytes)", ping.len()));
     let latency = match expect_packet(&mut stream, 0x01).await {
-        Ok(()) if stream.read_i64().await.ok() == Some(payload) => sent.elapsed(),
-        _ => status_rtt,
+        Ok(()) if stream.read_i64().await.ok() == Some(payload) => {
+            log.push(format!("got pong ({} ms)", sent.elapsed().as_millis()));
+            sent.elapsed()
+        }
+        _ => {
+            log.push("no pong, using the status response time".to_string());
+            status_rtt
+        }
     };
 
     Ok(Pong {

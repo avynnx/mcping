@@ -47,10 +47,13 @@ The install script puts `mcping` in `~/.local/bin`. Set `MCPING_INSTALL_DIR` to 
 mcping <SERVER>...
 
   -t, --timeout <SECS>   per-server timeout [default: 5]
-      --json             print JSON instead
-      --no-icon          don't draw the server icon
-      --icon-size <PX>   icon size in pixels, 2-64 [default: 16]
+  -j, --json             print JSON instead
+  -n, --no-icon          don't draw the server icon
+  -s, --icon-size <PX>   icon size in pixels, 2-64 [default: 16]
+  -v, --verbose          show each step of the ping
   -u, --uninstall        uninstall mcping
+  -h, --help             print help
+  -V, --version          print version
 ```
 
 Servers can be `host`, `host:port`, an IP or `[ipv6]:port`. Colors and icons turn off when output isn't a terminal or `NO_COLOR` is set, and `CLICOLOR_FORCE=1` keeps them on.
@@ -58,6 +61,24 @@ Servers can be `host`, `host:port`, an IP or `[ipv6]:port`. Colors and icons tur
 ```
 mcping play.example.net 10.0.0.5:25570 --json | jq '.[] | {server, latency_ms}'
 ```
+
+`-v` shows every step, which helps when a server won't answer:
+
+```
+$ mcping -v 2b2t.org
+→ SRV _minecraft._tcp.2b2t.org -> connect.2b2t.org:25565 (23 ms)
+→ resolved connect.2b2t.org -> 40.223.14.133 (54 ms)
+→ connecting to 40.223.14.133:25565
+→ connected to 40.223.14.133:25565 (10 ms)
+→ sent handshake and status request (21 bytes)
+→ got status response (12814 bytes, 56 ms)
+→ sent ping (10 bytes)
+→ got pong (11 ms)
+● 2b2t.org → connect.2b2t.org:25565  11 ms
+  ...
+```
+
+With `--json`, the steps go to stderr so the JSON stays clean.
 
 ## Uninstall
 
