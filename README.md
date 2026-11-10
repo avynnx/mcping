@@ -24,8 +24,10 @@ curl -fsSL avynnx.dev/mcping/install.sh | sh
 Windows:
 
 ```
-winget install avynnx.mcping
+irm avynnx.dev/mcping/install.ps1 | iex
 ```
+
+This puts `mcping` in `%LOCALAPPDATA%\Programs\mcping` and adds it to your PATH. winget (`winget install avynnx.mcping`) is on the way.
 
 Nix:
 
@@ -91,6 +93,7 @@ If you used the install script, this removes mcping. If you installed it with wi
 | Installed with | Uninstall with |
 |---|---|
 | install script | `mcping -u` or `rm ~/.local/bin/mcping` |
+| PowerShell script | delete `%LOCALAPPDATA%\Programs\mcping` |
 | winget | `winget uninstall avynnx.mcping` |
 | Cargo | `cargo uninstall mcping` |
 | Nix | `nix profile remove mcping` |

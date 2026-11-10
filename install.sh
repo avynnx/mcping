@@ -36,7 +36,7 @@ detect_target() {
     case "$os" in
         Linux) echo "$arch-unknown-linux-musl" ;;
         Darwin) echo "$arch-apple-darwin" ;;
-        *) die "unsupported OS: $os (on Windows, use winget install avynnx.mcping)" ;;
+        *) die "unsupported OS: $os (on Windows, run: irm avynnx.dev/mcping/install.ps1 | iex)" ;;
     esac
 }
 
