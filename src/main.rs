@@ -8,7 +8,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use hickory_resolver::TokioResolver;
 use hickory_resolver::proto::rr::RData;
@@ -93,9 +93,10 @@ async fn main() -> ExitCode {
         .map(|server| {
             tokio::spawn(async move {
                 let mut log = Vec::new();
-                let result = tokio::time::timeout(timeout, query(&server, &mut log))
-                    .await
-                    .unwrap_or_else(|_| Err(anyhow!("timed out")));
+                let result = match tokio::time::timeout(timeout, query(&server, &mut log)).await {
+                    Ok(result) => result,
+                    Err(_) => Err(anyhow!(timed_out(&log))),
+                };
                 (server, log, result)
             })
         })
@@ -174,7 +175,7 @@ async fn query(server: &str, log: &mut Vec<String>) -> Result<Reply> {
         let ips: Vec<String> = addrs.iter().map(|addr| addr.ip().to_string()).collect();
         log.push(format!(
             "resolved {target} -> {} ({} ms)",
-            ips.join(", "),
+            protocol::short_list(&ips),
             started.elapsed().as_millis()
         ));
     }
@@ -195,19 +196,49 @@ async fn query(server: &str, log: &mut Vec<String>) -> Result<Reply> {
 }
 
 fn split_address(server: &str) -> Result<(&str, Option<u16>)> {
-    if let Some(rest) = server.strip_prefix('[') {
+    let (host, port) = if let Some(rest) = server.strip_prefix('[') {
         let (host, rest) = rest.split_once(']').context("missing ']' in address")?;
-        let port = match rest.strip_prefix(':') {
-            Some(port) => Some(port.parse().context("invalid port")?),
-            None => None,
-        };
-        return Ok((host, port));
-    }
-    match server.rsplit_once(':') {
-        Some((host, port)) if !host.contains(':') => {
-            Ok((host, Some(port.parse().context("invalid port")?)))
+        (host, rest.strip_prefix(':'))
+    } else {
+        match server.rsplit_once(':') {
+            Some((host, port)) if !host.contains(':') => (host, Some(port)),
+            _ => (server, None),
         }
-        _ => Ok((server, None)),
+    };
+    if host.trim().is_empty() {
+        bail!("missing host");
+    }
+    let port = match port {
+        Some(port) => match port.parse::<u16>() {
+            Ok(p) if p != 0 => Some(p),
+            _ => bail!("invalid port {port}"),
+        },
+        None => None,
+    };
+    Ok((host, port))
+}
+
+fn timed_out(log: &[String]) -> &'static str {
+    match log.last() {
+        Some(step) if step.starts_with("connecting") => "timed out while connecting",
+        Some(step) if step.starts_with("sent") => "timed out waiting for the server to respond",
+        _ => "timed out",
+    }
+}
+
+fn describe(error: &anyhow::Error) -> String {
+    use std::io::ErrorKind;
+    match error
+        .downcast_ref::<std::io::Error>()
+        .map(std::io::Error::kind)
+    {
+        Some(ErrorKind::ConnectionRefused) => {
+            "connection refused, nothing is listening on that port".to_string()
+        }
+        Some(
+            ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::UnexpectedEof,
+        ) => "server closed the connection".to_string(),
+        _ => format!("{error:#}"),
     }
 }
 
@@ -380,7 +411,7 @@ fn print_log(log: &[String], color: bool) {
 }
 
 fn print_error(server: &str, error: &anyhow::Error, color: bool) {
-    let message = format!("{error:#}");
+    let message = describe(error);
     if color {
         println!("{} {}  {}\n", "✗".red(), server.bold(), message.red());
     } else {
@@ -402,7 +433,7 @@ fn print_json(results: &[(String, Vec<String>, Result<Reply>)]) {
             Err(e) => json!({
                 "server": server,
                 "online": false,
-                "error": format!("{e:#}"),
+                "error": describe(e),
             }),
         })
         .collect();
@@ -411,7 +442,7 @@ fn print_json(results: &[(String, Vec<String>, Result<Reply>)]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{motd_lines, split_address, status, thousands};
+    use super::{motd_lines, split_address, status, thousands, timed_out};
     use serde_json::json;
 
     #[test]
@@ -442,5 +473,37 @@ mod tests {
         assert_eq!(split_address("[::1]:25565").unwrap(), ("::1", Some(25565)));
         assert_eq!(split_address("::1").unwrap(), ("::1", None));
         assert!(split_address("host:notaport").is_err());
+    }
+
+    #[test]
+    fn rejects_bad_addresses() {
+        let error = |server| split_address(server).unwrap_err().to_string();
+        assert_eq!(error(""), "missing host");
+        assert_eq!(error(":25565"), "missing host");
+        assert_eq!(error("[]:25565"), "missing host");
+        assert_eq!(error("host:0"), "invalid port 0");
+        assert_eq!(error("host:99999"), "invalid port 99999");
+        assert_eq!(error("host:abc"), "invalid port abc");
+        assert_eq!(error("[::1]:0"), "invalid port 0");
+    }
+
+    #[test]
+    fn says_where_it_timed_out() {
+        let log = |steps: &[&str]| steps.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(timed_out(&log(&[])), "timed out");
+        assert_eq!(
+            timed_out(&log(&[
+                "resolved a -> 1.2.3.4",
+                "connecting to 1.2.3.4:25565"
+            ])),
+            "timed out while connecting"
+        );
+        assert_eq!(
+            timed_out(&log(&[
+                "connected to 1.2.3.4:25565",
+                "sent ping (10 bytes)"
+            ])),
+            "timed out waiting for the server to respond"
+        );
     }
 }
